@@ -481,6 +481,13 @@ namespace MOX2 {
         SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "mox2: Set_Mox_Alt_Path start");
 
         if (!dos::DIR("orioncd.ini", alternate_path, sizeof(alternate_path))) {
+            // ORIONCD.INI only points at the CD; it isn't needed when the game
+            // files already resolve, such as from embedded assets.
+            if (vfs::File_Exists("diplomat.lbx") != 0) {
+                SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "mox2: no orioncd.ini, diplomat.lbx resolved through vfs");
+                return;
+            }
+
             if (MOX::settings.language == 0) {
                 error_text = "ORIONCD.INI not found. Please Re-Install Orion ][.";
             } else if (MOX::settings.language == 1) {
