@@ -96,7 +96,7 @@ if(MSVC)
     set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>" CACHE STRING "" FORCE)
 endif()
 
-set(ORION2RE_GAME_DIR "" CACHE PATH "Optional game directory used for runtime output and debugger working directory")
+set(ORION2RE_GAME_DIR "" CACHE PATH "Optional Master of Orion II install whose assets are embedded into orion2re")
 set(ORION2RE_BASE_DATA_DIR "${CMAKE_CURRENT_SOURCE_DIR}/data/base")
 set(ORION2RE_PACKAGED_BASE_ARCHIVE "${CMAKE_CURRENT_BINARY_DIR}/data/base.zip")
 set(ORION2RE_DEFAULT_CONFIG "${CMAKE_CURRENT_SOURCE_DIR}/data/orion2re.cfg")
@@ -204,6 +204,12 @@ endif()
 if(ORION2RE_BUILD_DOCUMENTATION AND NOT ORION2RE_BUILD_CONFIG_TOOL)
     message(FATAL_ERROR
         "ORION2RE_BUILD_DOCUMENTATION requires ORION2RE_BUILD_CONFIG_TOOL=ON."
+    )
+endif()
+
+if(ORION2RE_GAME_DIR AND ORION2RE_BUILD_GAME AND (MSVC OR CMAKE_CROSSCOMPILING))
+    message(FATAL_ERROR
+        "Embedding ORION2RE_GAME_DIR assets requires a native GCC or Clang build: the packer runs at build time and the archive is linked with .incbin."
     )
 endif()
 
@@ -515,14 +521,6 @@ set(ORION2RE_PACKAGE_BASE_DATA_COMMANDS
     COMMAND ${CMAKE_COMMAND} -E tar cf "${ORION2RE_PACKAGED_BASE_ARCHIVE}"
         --format=zip -- .
 )
-if(ORION2RE_GAME_DIR)
-    list(APPEND ORION2RE_PACKAGE_BASE_DATA_COMMANDS
-        COMMAND ${CMAKE_COMMAND} -E make_directory "${ORION2RE_GAME_DIR}/data"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${ORION2RE_PACKAGED_BASE_ARCHIVE}"
-            "${ORION2RE_GAME_DIR}/data/base.zip"
-    )
-endif()
 add_custom_target(package-base-data
     ${ORION2RE_PACKAGE_BASE_DATA_COMMANDS}
     WORKING_DIRECTORY "${ORION2RE_BASE_DATA_DIR}"
@@ -537,15 +535,6 @@ set(ORION2RE_PACKAGE_DEFAULT_CONFIG_COMMANDS
         "-DOUTPUT_FILE=${CMAKE_CURRENT_BINARY_DIR}/data/orion2re.cfg"
         -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/copy_if_missing.cmake"
 )
-if(ORION2RE_GAME_DIR)
-    list(APPEND ORION2RE_PACKAGE_DEFAULT_CONFIG_COMMANDS
-        COMMAND ${CMAKE_COMMAND} -E make_directory "${ORION2RE_GAME_DIR}/data"
-        COMMAND ${CMAKE_COMMAND}
-            "-DINPUT_FILE=${ORION2RE_DEFAULT_CONFIG}"
-            "-DOUTPUT_FILE=${ORION2RE_GAME_DIR}/data/orion2re.cfg"
-            -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/copy_if_missing.cmake"
-    )
-endif()
 add_custom_target(package-default-config
     ${ORION2RE_PACKAGE_DEFAULT_CONFIG_COMMANDS}
     DEPENDS "${ORION2RE_DEFAULT_CONFIG}"
@@ -583,27 +572,9 @@ add_custom_target(package-supported-mods
     DEPENDS ${ORION2RE_SUPPORTED_MOD_ARCHIVES}
 )
 
-if(ORION2RE_GAME_DIR)
-    add_custom_target(deploy-supported-mods
-        COMMAND ${CMAKE_COMMAND} -E make_directory
-            "${ORION2RE_GAME_DIR}/data/mods"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            ${ORION2RE_SUPPORTED_MOD_ARCHIVES}
-            "${ORION2RE_GAME_DIR}/data/mods"
-        DEPENDS package-supported-mods
-        VERBATIM
-    )
-endif()
-
-if(ORION2RE_GAME_DIR)
-    add_custom_target(package-runtime-data
-        DEPENDS package-base-data package-default-config deploy-supported-mods
-    )
-else()
-    add_custom_target(package-runtime-data
-        DEPENDS package-base-data package-default-config package-supported-mods
-    )
-endif()
+add_custom_target(package-runtime-data
+    DEPENDS package-base-data package-default-config package-supported-mods
+)
 
 set(ORION2RE_ROUTER_SOURCES
     src/network/router_cli.cpp
@@ -675,28 +646,72 @@ if(ORION2RE_BUILD_GAME)
     endif()
 
     if(ORION2RE_GAME_DIR)
-        add_custom_command(TARGET orion2re POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                $<TARGET_FILE:orion2re>
-                "${ORION2RE_GAME_DIR}/$<TARGET_FILE_NAME:orion2re>"
-        )
+        # Pack the install's LBX files with the base data and default config
+        # into a stored ZIP, then link it into the executable so it runs
+        # without the install. Files on disk beside the executable still win.
+        add_executable(pack-assets tools/pack_assets.cpp)
+        target_link_libraries(pack-assets PRIVATE miniz)
 
-        if(MSVC)
-            add_custom_command(TARGET orion2re POST_BUILD
-                COMMAND ${CMAKE_COMMAND}
-                    "-DINPUT_FILE=$<TARGET_PDB_FILE:orion2re>"
-                    "-DOUTPUT_FILE=${ORION2RE_GAME_DIR}/$<TARGET_PDB_FILE_NAME:orion2re>"
-                    -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/copy_if_exists.cmake"
-            )
+        file(GLOB ORION2RE_GAME_LBX_FILES CONFIGURE_DEPENDS
+            "${ORION2RE_GAME_DIR}/*.LBX"
+            "${ORION2RE_GAME_DIR}/*.lbx"
+        )
+        list(REMOVE_DUPLICATES ORION2RE_GAME_LBX_FILES)
+        if(NOT ORION2RE_GAME_LBX_FILES)
+            message(FATAL_ERROR "No LBX files found in ORION2RE_GAME_DIR '${ORION2RE_GAME_DIR}'.")
         endif()
+
+        set(ORION2RE_EMBEDDED_ASSET_FILES)
+        set(ORION2RE_EMBEDDED_ASSETS_MANIFEST_CONTENT "")
+        foreach(ORION2RE_ASSET_FILE IN LISTS ORION2RE_GAME_LBX_FILES)
+            get_filename_component(ORION2RE_ASSET_NAME "${ORION2RE_ASSET_FILE}" NAME)
+            string(APPEND ORION2RE_EMBEDDED_ASSETS_MANIFEST_CONTENT "${ORION2RE_ASSET_NAME}	${ORION2RE_ASSET_FILE}
+")
+            list(APPEND ORION2RE_EMBEDDED_ASSET_FILES "${ORION2RE_ASSET_FILE}")
+        endforeach()
+        foreach(ORION2RE_ASSET_FILE IN LISTS ORION2RE_BASE_DATA_FILES)
+            file(RELATIVE_PATH ORION2RE_ASSET_NAME "${ORION2RE_BASE_DATA_DIR}" "${ORION2RE_ASSET_FILE}")
+            string(APPEND ORION2RE_EMBEDDED_ASSETS_MANIFEST_CONTENT "${ORION2RE_ASSET_NAME}	${ORION2RE_ASSET_FILE}
+")
+            list(APPEND ORION2RE_EMBEDDED_ASSET_FILES "${ORION2RE_ASSET_FILE}")
+        endforeach()
+        string(APPEND ORION2RE_EMBEDDED_ASSETS_MANIFEST_CONTENT "orion2re.cfg	${ORION2RE_DEFAULT_CONFIG}
+")
+        list(APPEND ORION2RE_EMBEDDED_ASSET_FILES "${ORION2RE_DEFAULT_CONFIG}")
+
+        set(ORION2RE_EMBEDDED_ASSETS_MANIFEST "${CMAKE_CURRENT_BINARY_DIR}/embedded_assets.manifest")
+        set(ORION2RE_EMBEDDED_ASSETS_ARCHIVE "${CMAKE_CURRENT_BINARY_DIR}/embedded_assets.zip")
+        set(ORION2RE_EMBEDDED_ASSETS_SOURCE "${CMAKE_CURRENT_BINARY_DIR}/generated/embedded_assets.cpp")
+        file(GENERATE OUTPUT "${ORION2RE_EMBEDDED_ASSETS_MANIFEST}"
+            CONTENT "${ORION2RE_EMBEDDED_ASSETS_MANIFEST_CONTENT}"
+        )
+        add_custom_command(
+            OUTPUT "${ORION2RE_EMBEDDED_ASSETS_ARCHIVE}"
+            COMMAND pack-assets
+                "${ORION2RE_EMBEDDED_ASSETS_MANIFEST}"
+                "${ORION2RE_EMBEDDED_ASSETS_ARCHIVE}"
+            DEPENDS
+                pack-assets
+                "${ORION2RE_EMBEDDED_ASSETS_MANIFEST}"
+                ${ORION2RE_EMBEDDED_ASSET_FILES}
+            VERBATIM
+        )
+        configure_file(
+            "${CMAKE_CURRENT_SOURCE_DIR}/cmake/embedded_assets.cpp.in"
+            "${ORION2RE_EMBEDDED_ASSETS_SOURCE}"
+            @ONLY
+        )
+        set_source_files_properties("${ORION2RE_EMBEDDED_ASSETS_SOURCE}" PROPERTIES
+            OBJECT_DEPENDS "${ORION2RE_EMBEDDED_ASSETS_ARCHIVE}"
+            SKIP_PRECOMPILE_HEADERS ON
+        )
+        target_sources(orion2re PRIVATE "${ORION2RE_EMBEDDED_ASSETS_SOURCE}")
+        target_compile_definitions(orion2re PRIVATE ORION2RE_EMBEDDED_ASSETS=1)
     endif()
 
     if(APPLE AND CMAKE_BUILD_TYPE STREQUAL "Release")
         add_custom_target(orion2re-app ALL DEPENDS orion2re)
         set(ORION2RE_APP_DIRS "${CMAKE_CURRENT_BINARY_DIR}")
-        if(ORION2RE_GAME_DIR)
-            list(APPEND ORION2RE_APP_DIRS "${ORION2RE_GAME_DIR}")
-        endif()
         foreach(ORION2RE_APP_DIR IN LISTS ORION2RE_APP_DIRS)
             set(ORION2RE_APP_CONTENTS "${ORION2RE_APP_DIR}/Orion2 Redone.app/Contents")
             add_custom_command(TARGET orion2re-app POST_BUILD
@@ -903,12 +918,6 @@ endif()
 if(TARGET orion2re)
     target_compile_definitions(orion2re PRIVATE
         $<$<CONFIG:Debug>:ORION2RE_DEBUG_BUILD=1>
-    )
-endif()
-
-if(ORION2RE_GAME_DIR AND TARGET orion2re)
-    set_target_properties(orion2re PROPERTIES
-        VS_DEBUGGER_WORKING_DIRECTORY "${ORION2RE_GAME_DIR}"
     )
 endif()
 

@@ -1,0 +1,25 @@
+// Generated from cmake/embedded_assets.cpp.in. Links the packed game assets
+// into the executable as read-only data; main.cpp mounts them through
+// vfs::Mount_Embedded_Archive.
+
+#define ORION2RE_STRINGIFY_(x) #x
+#define ORION2RE_SYMBOL_(prefix, name) ORION2RE_STRINGIFY_(prefix) #name
+#define ORION2RE_GLOBAL_(name) ORION2RE_SYMBOL_(__USER_LABEL_PREFIX__, name)
+
+#if defined(_WIN32)
+#define ORION2RE_RODATA_SECTION_ ".section .rdata,\"dr\"\n"
+#elif defined(__APPLE__)
+#define ORION2RE_RODATA_SECTION_ ".const_data\n"
+#else
+#define ORION2RE_RODATA_SECTION_ ".section .rodata\n"
+#endif
+
+__asm__(
+    ORION2RE_RODATA_SECTION_
+    ".balign 16\n"
+    ".globl " ORION2RE_GLOBAL_(orion2re_embedded_assets) "\n"
+    ORION2RE_GLOBAL_(orion2re_embedded_assets) ":\n"
+    ".incbin \"@ORION2RE_EMBEDDED_ASSETS_ARCHIVE@\"\n"
+    ".globl " ORION2RE_GLOBAL_(orion2re_embedded_assets_end) "\n"
+    ORION2RE_GLOBAL_(orion2re_embedded_assets_end) ":\n"
+    ".text\n");

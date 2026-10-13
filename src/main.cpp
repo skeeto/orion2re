@@ -27,6 +27,12 @@ static void Build_Path_(char* output, size_t output_size, const char* base_path,
     }
 }
 
+#if defined(ORION2RE_EMBEDDED_ASSETS)
+// Defined by the generated embedded_assets.cpp.
+extern "C" const unsigned char orion2re_embedded_assets[];
+extern "C" const unsigned char orion2re_embedded_assets_end[];
+#endif
+
 static FILE* _game_log_file;
 static SDL_LogOutputFunction _console_log_output;
 static void* _console_log_userdata;
@@ -224,6 +230,19 @@ int main(int argc, char** argv) {
         Shutdown_Game_Log_();
         return -1;
     }
+
+#if defined(ORION2RE_EMBEDDED_ASSETS)
+    const size_t embedded_assets_size = (uintptr_t)orion2re_embedded_assets_end - (uintptr_t)orion2re_embedded_assets;
+    if (vfs::Mount_Embedded_Archive(orion2re_embedded_assets, embedded_assets_size) == 0) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "main: unable to mount embedded assets");
+        vfs::Shutdown();
+        if (current_directory != nullptr) {
+            SDL_free(current_directory);
+        }
+        Shutdown_Game_Log_();
+        return -1;
+    }
+#endif
 
     config::s_effective_config effective_config;
     config::s_cfg_diagnostic config_diagnostic;
