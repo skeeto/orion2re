@@ -12,6 +12,7 @@
 #include "lua/lua_mod_runtime.h"
 
 #if defined(_WIN32)
+#include <direct.h>
 #include <io.h>
 #include <process.h>
 #else
@@ -186,6 +187,27 @@ int main(int argc, char** argv) {
     filename[1] = '\0';
     if (chdir(resolved_path) != 0) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "main: unable to set working directory to '%s': %s", resolved_path, strerror(errno));
+        Shutdown_Game_Log_();
+        return -1;
+    }
+#else
+    // Saves and settings are opened by relative path, so run from the
+    // executable's directory regardless of how the game was launched.
+    if (base_path == nullptr) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "main: unable to resolve executable directory: %s", SDL_GetError());
+        Shutdown_Game_Log_();
+        return -1;
+    }
+#if defined(_WIN32)
+    // SDL paths are UTF-8, but narrow chdir uses the ANSI code page.
+    wchar_t* wide_base_path = (wchar_t*)SDL_iconv_string("UTF-16LE", "UTF-8", base_path, strlen(base_path) + 1);
+    const int chdir_result = wide_base_path != nullptr ? _wchdir(wide_base_path) : -1;
+    SDL_free(wide_base_path);
+#else
+    const int chdir_result = chdir(base_path);
+#endif
+    if (chdir_result != 0) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "main: unable to set working directory to '%s': %s", base_path, strerror(errno));
         Shutdown_Game_Log_();
         return -1;
     }
