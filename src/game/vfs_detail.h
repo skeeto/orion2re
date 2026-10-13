@@ -19,6 +19,7 @@ namespace vfs_detail {
         VFS_BACKEND_RAW_FILE,
         VFS_BACKEND_ZIP_ENTRY,
         VFS_BACKEND_SLICE,
+        VFS_BACKEND_MEMORY,
     };
 
     enum e_vfs_candidate_kind {
@@ -43,6 +44,13 @@ namespace vfs_detail {
     struct s_vfs_zip_cache_entry {
         char asset_key[VFS_MAX_PATH];
         s_vfs_zip_entry entry;
+    };
+
+    // Stored entry in an archive held in memory for the life of the process.
+    struct s_vfs_memory_entry {
+        char asset_key[VFS_MAX_PATH];
+        const uint8_t* data;
+        int32_t size;
     };
 
     struct s_vfs_package_layer {
@@ -76,6 +84,7 @@ namespace vfs_detail {
         std::vector<s_vfs_zip_archive> zip_archives;
         std::vector<s_vfs_zip_cache_entry> zip_entries;
         std::vector<s_vfs_package_layer> package_layers;
+        std::vector<s_vfs_memory_entry> embedded_entries;
     };
 
     struct s_vfs_backend_ops {
@@ -121,6 +130,8 @@ namespace vfs_detail {
     s_vfs_raw_file_stream* Get_Raw_File_Stream_(s_vfs_file* file);
     s_vfs_zip_file_stream* Get_Zip_File_Stream_(s_vfs_file* file);
     bool Seek_Zip_File_(s_vfs_file* file, int32_t new_position);
+    bool Find_Embedded_Entry_(const char* asset_path, s_vfs_memory_entry* memory_entry);
+    s_vfs_file* Open_Memory_File_(const s_vfs_memory_entry& memory_entry);
     s_vfs_file* Open_Slice_File_(s_vfs_file* parent_file, int32_t data_offset, int32_t data_size);
     s_vfs_slice_file_stream* Get_Slice_File_Stream_(s_vfs_file* file);
 
@@ -142,9 +153,16 @@ namespace vfs_detail {
     int32_t Slice_File_Tell_(s_vfs_file* file);
     int32_t Slice_File_Close_(s_vfs_file* file);
 
+    size_t Memory_File_Read_(void* ptr, size_t size, size_t count, s_vfs_file* file);
+    int32_t Memory_File_Size_(s_vfs_file* file);
+    int32_t Memory_File_Seek_(s_vfs_file* file, int32_t offset, int32_t origin);
+    int32_t Memory_File_Tell_(s_vfs_file* file);
+    int32_t Memory_File_Close_(s_vfs_file* file);
+
     extern const s_vfs_backend_ops g_vfs_raw_file_ops;
     extern const s_vfs_backend_ops g_vfs_zip_file_ops;
     extern const s_vfs_backend_ops g_vfs_slice_file_ops;
+    extern const s_vfs_backend_ops g_vfs_memory_file_ops;
 } // namespace vfs_detail
 
 struct s_vfs_mount_transaction {

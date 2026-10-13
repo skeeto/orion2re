@@ -110,6 +110,22 @@ namespace test_vfs_detail {
       private:
         fs::path root_path_;
     };
+
+    std::string Build_Zip_In_Memory_(const std::vector<std::pair<std::string, std::string>>& entries, mz_uint level) {
+        mz_zip_archive archive{};
+        void* buffer = nullptr;
+        size_t buffer_size = 0;
+
+        mz_zip_zero_struct(&archive);
+        DOCTEST_REQUIRE(mz_zip_writer_init_heap(&archive, 0, 0) == MZ_TRUE);
+        for (const auto& entry : entries) {
+            DOCTEST_REQUIRE(mz_zip_writer_add_mem(&archive, entry.first.c_str(), entry.second.data(), entry.second.size(), level) == MZ_TRUE);
+        }
+        DOCTEST_REQUIRE(mz_zip_writer_finalize_heap_archive(&archive, &buffer, &buffer_size) == MZ_TRUE);
+        std::string result(static_cast<const char*>(buffer), buffer_size);
+        DOCTEST_REQUIRE(mz_zip_writer_end(&archive) == MZ_TRUE);
+        return result;
+    }
 } // namespace test_vfs_detail
 
 DOCTEST_TEST_SUITE("vfs cpp") {
@@ -646,5 +662,88 @@ DOCTEST_TEST_SUITE("vfs cpp") {
         DOCTEST_CHECK(vfs::fread(buffer.data(), 1, 18, file) == 18);
         DOCTEST_CHECK(std::string(buffer.data(), 18) == "zip-entry-override");
         DOCTEST_CHECK(vfs::fclose(file) == 0);
+    }
+
+    DOCTEST_TEST_CASE("embedded archive serves stored entries as the last asset layer") {
+        test_vfs_detail::Scoped_Vfs_Test_Directory test_dir;
+        test_dir.Write_File("shared.dat", "raw-shared");
+        test_dir.Write_File(test_vfs_detail::fs::path("data") / "config.cfg", "data-config");
+        const std::string archive = test_vfs_detail::Build_Zip_In_Memory_({
+                                                                              {"MUSIC/THEME.DAT", "embedded-theme"},
+                                                                              {"shared.dat", "embedded-shared"},
+                                                                              {"config.cfg", "embedded-config"},
+                                                                          },
+            MZ_NO_COMPRESSION);
+
+        const std::string base_path = test_dir.root_path().string();
+        DOCTEST_REQUIRE(vfs::Init(base_path.c_str()) == 1);
+        DOCTEST_CHECK(vfs::File_Exists("music/theme.dat") == 0);
+        DOCTEST_REQUIRE(vfs::Mount_Embedded_Archive(archive.data(), archive.size()) == 1);
+        DOCTEST_CHECK(vfs::File_Exists("music/theme.dat") == 1);
+        DOCTEST_CHECK(test_vfs_detail::Read_Vfs_File_("shared.dat") == "raw-shared");
+        DOCTEST_CHECK(test_vfs_detail::Read_Vfs_File_("config.cfg") == "data-config");
+
+        s_vfs_file* file = vfs::fopen("Music/Theme.dat", "rb");
+        DOCTEST_REQUIRE(file != nullptr);
+        DOCTEST_CHECK(vfs::fsize(file) == 14);
+
+        std::array<char, 16> buffer{};
+        DOCTEST_CHECK(vfs::fseek(file, -5, SEEK_END) == 0);
+        DOCTEST_CHECK(vfs::fread(buffer.data(), 1, 8, file) == 5);
+        DOCTEST_CHECK(std::string(buffer.data(), 5) == "theme");
+        DOCTEST_CHECK(vfs::fseek(file, 0, SEEK_SET) == 0);
+        DOCTEST_CHECK(vfs::fread(buffer.data(), 4, 2, file) == 2);
+        DOCTEST_CHECK(std::string(buffer.data(), 8) == "embedded");
+        DOCTEST_CHECK(vfs::fseek(file, 15, SEEK_SET) == -1);
+        DOCTEST_CHECK(vfs::fclose(file) == 0);
+
+        vfs::Shutdown();
+        DOCTEST_REQUIRE(vfs::Init(base_path.c_str()) == 1);
+        DOCTEST_CHECK(vfs::File_Exists("music/theme.dat") == 0);
+    }
+
+    DOCTEST_TEST_CASE("embedded archive serves lbx entries and per-entry overrides") {
+        test_vfs_detail::Scoped_Vfs_Test_Directory test_dir;
+        test_dir.Write_Lbx_File("SOURCE.LBX", {"whole-zero", "whole-one"});
+
+        std::ifstream lbx_stream(test_dir.root_path() / "SOURCE.LBX", std::ios::binary);
+        std::string lbx_contents((std::istreambuf_iterator<char>(lbx_stream)), std::istreambuf_iterator<char>());
+        DOCTEST_REQUIRE(!lbx_contents.empty());
+        const std::string archive = test_vfs_detail::Build_Zip_In_Memory_({
+                                                                              {"TEST.LBX", lbx_contents},
+                                                                              {"TEST.LBX/001", "entry-override"},
+                                                                          },
+            MZ_NO_COMPRESSION);
+
+        const std::string base_path = test_dir.root_path().string();
+        DOCTEST_REQUIRE(vfs::Init(base_path.c_str()) == 1);
+        DOCTEST_REQUIRE(vfs::Mount_Embedded_Archive(archive.data(), archive.size()) == 1);
+
+        std::array<char, 32> buffer{};
+        s_vfs_file* file = vfs::fopen_lbx("test.lbx", 0);
+        DOCTEST_REQUIRE(file != nullptr);
+        DOCTEST_CHECK(vfs::fread(buffer.data(), 1, 10, file) == 10);
+        DOCTEST_CHECK(std::string(buffer.data(), 10) == "whole-zero");
+        DOCTEST_CHECK(vfs::fclose(file) == 0);
+
+        file = vfs::fopen_lbx("test.lbx", 1);
+        DOCTEST_REQUIRE(file != nullptr);
+        DOCTEST_CHECK(vfs::fread(buffer.data(), 1, 14, file) == 14);
+        DOCTEST_CHECK(std::string(buffer.data(), 14) == "entry-override");
+        DOCTEST_CHECK(vfs::fclose(file) == 0);
+    }
+
+    DOCTEST_TEST_CASE("embedded archive rejects compressed entries") {
+        test_vfs_detail::Scoped_Vfs_Test_Directory test_dir;
+        const std::string archive = test_vfs_detail::Build_Zip_In_Memory_({
+                                                                              {"packed.dat", std::string(4096, 'x')},
+                                                                          },
+            MZ_BEST_COMPRESSION);
+
+        const std::string base_path = test_dir.root_path().string();
+        DOCTEST_REQUIRE(vfs::Init(base_path.c_str()) == 1);
+        DOCTEST_CHECK(vfs::Mount_Embedded_Archive(archive.data(), archive.size()) == 0);
+        DOCTEST_CHECK(vfs::File_Exists("packed.dat") == 0);
+        DOCTEST_CHECK(vfs::Mount_Embedded_Archive("not a zip", 9) == 0);
     }
 }

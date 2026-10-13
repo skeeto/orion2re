@@ -331,6 +331,7 @@ orion2re_add_unit_test(test_lua_mod_runtime
         src/game/vfs_lbx.cpp
         src/game/vfs_path.cpp
         src/game/vfs_zip.cpp
+        src/game/vfs_memory.cpp
     FAKE_SOURCES
         tests/fakes/fake_lua_game_state.cpp
         tests/fakes/fake_lua_network_config.cpp
@@ -540,6 +541,7 @@ orion2re_add_unit_test(test_config_loader
         src/game/vfs_lbx.cpp
         src/game/vfs_path.cpp
         src/game/vfs_zip.cpp
+        src/game/vfs_memory.cpp
         vendors/yyjson/src/yyjson.c
     FAKE_SOURCES
         tests/fakes/fake_config_netturn_runtime.cpp
@@ -1808,6 +1810,7 @@ orion2re_add_unit_test(test_vfs
         src/game/vfs_lbx.cpp
         src/game/vfs_path.cpp
         src/game/vfs_zip.cpp
+        src/game/vfs_memory.cpp
     LIBRARIES
         miniz
     LINK_SDL
@@ -1869,6 +1872,7 @@ orion2re_add_unit_test(test_farload_buffer_vfs
         src/game/vfs_lbx.cpp
         src/game/vfs_path.cpp
         src/game/vfs_zip.cpp
+        src/game/vfs_memory.cpp
     FAKE_SOURCES
         tests/fakes/fake_allocate.cpp
         tests/fakes/fake_exitm.cpp

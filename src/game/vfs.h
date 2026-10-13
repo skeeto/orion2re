@@ -14,6 +14,14 @@ namespace vfs {
     void Shutdown();
     int8_t Set_Raw_Fallback_Path(const char* path);
 
+    /**
+     * Mounts a ZIP archive held in memory as the lowest-priority asset layer.
+     * Every file entry must be stored uncompressed. Entries are served directly
+     * from the archive, so it must outlive the mount (until Shutdown).
+     * @return 1 on success, 0 if the archive is malformed or has compressed entries.
+     */
+    int8_t Mount_Embedded_Archive(const void* data, size_t size);
+
     s_vfs_mount_transaction* Begin_Mount_Transaction();
     int8_t Stage_Package_Mount(s_vfs_mount_transaction* transaction,
         const char* package_id,

@@ -55,6 +55,7 @@ namespace vfs {
         }
         vfs_detail::Close_Package_Layers_(&vfs_detail::g_vfs_state.package_layers);
         vfs_detail::Close_Zip_Archives_();
+        vfs_detail::g_vfs_state.embedded_entries.clear();
         vfs_detail::g_vfs_state.initialized = false;
         vfs_detail::g_vfs_state.base_path[0] = '\0';
         vfs_detail::g_vfs_state.fallback_path[0] = '\0';
@@ -382,6 +383,11 @@ namespace vfs {
             return vfs_detail::Open_Raw_File_(resolved_path, mode);
         }
 
+        vfs_detail::s_vfs_memory_entry memory_entry;
+        if (vfs_detail::Find_Embedded_Entry_(asset_path, &memory_entry)) {
+            return vfs_detail::Open_Memory_File_(memory_entry);
+        }
+
         return nullptr;
     }
 
@@ -509,6 +515,10 @@ namespace vfs {
             return 1;
         }
 
-        return vfs_detail::Resolve_Raw_Asset_Path_(asset_path, resolved_path, sizeof(resolved_path)) ? 1 : 0;
+        if (vfs_detail::Resolve_Raw_Asset_Path_(asset_path, resolved_path, sizeof(resolved_path))) {
+            return 1;
+        }
+
+        return vfs_detail::Find_Embedded_Entry_(asset_path, nullptr) ? 1 : 0;
     }
 } // namespace vfs
