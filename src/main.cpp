@@ -19,14 +19,6 @@
 #include <unistd.h>
 #endif
 
-static void Build_Path_(char* output, size_t output_size, const char* base_path, const char* relative_path) {
-    if (base_path != nullptr && base_path[0] != '\0') {
-        snprintf(output, output_size, "%s%s", base_path, relative_path);
-    } else {
-        snprintf(output, output_size, "%s", relative_path);
-    }
-}
-
 #if defined(ORION2RE_EMBEDDED_ASSETS)
 // Defined by the generated embedded_assets.cpp.
 extern "C" const unsigned char orion2re_embedded_assets[];
@@ -36,6 +28,16 @@ extern "C" const unsigned char orion2re_embedded_assets_end[];
 static FILE* _game_log_file;
 static SDL_LogOutputFunction _console_log_output;
 static void* _console_log_userdata;
+
+#if defined(ORION2RE_DEBUG_BUILD)
+// Only Debug builds write logs/game.<pid>.log beside the executable.
+static void Build_Path_(char* output, size_t output_size, const char* base_path, const char* relative_path) {
+    if (base_path != nullptr && base_path[0] != '\0') {
+        snprintf(output, output_size, "%s%s", base_path, relative_path);
+    } else {
+        snprintf(output, output_size, "%s", relative_path);
+    }
+}
 
 static const char* Log_Priority_Name_(SDL_LogPriority priority) {
     switch (priority) {
@@ -85,6 +87,7 @@ static void Configure_Game_Log_() {
         SDL_SetLogOutputFunction(Game_Log_Output_, _game_log_file);
     }
 }
+#endif
 
 static void Shutdown_Game_Log_() {
     if (_game_log_file == nullptr) {
@@ -168,7 +171,9 @@ static void Configure_Sanitizer_Runtime_() {
 #endif
 
 int main(int argc, char** argv) {
+#if defined(ORION2RE_DEBUG_BUILD)
     Configure_Game_Log_();
+#endif
 
 #if defined(ORION2RE_ASAN_BUILD)
     Configure_Sanitizer_Runtime_();
